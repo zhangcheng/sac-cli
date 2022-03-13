@@ -1,0 +1,100 @@
+FROM debian:stable-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# chromium is needed.
+# otherwise at last step to install puppeteer
+# "The chromium binary is not available for arm64."
+RUN apt-get update
+RUN echo "ca-certificates" \
+        && apt-get install -y --no-install-recommends \
+                ca-certificates \
+        && apt-get install -y --no-install-recommends \
+                curl \
+                file \
+        && apt-get install -y --no-install-recommends \
+                g++ \
+        && apt-get install -y --no-install-recommends \
+                git \
+        && apt-get install -y --no-install-recommends \
+                gnupg \
+                locales \
+                make \
+        && apt-get install -y --no-install-recommends \
+                ssh \
+                sudo \
+                tree \
+        && apt-get install -y --no-install-recommends \
+                uuid-runtime \
+                vim \
+                wget \
+                # for build ruby 2.6.8
+                libssl-dev libreadline-dev zlib1g-dev bzip2
+RUN echo "hello" \
+        # move chromium install to last, since it's easy to break
+        && apt-get install -y --no-install-recommends \
+                chromium \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/* \
+        && sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+        && dpkg-reconfigure locales \
+        && update-locale LANG=en_US.UTF-8 \
+        && useradd -m -s /bin/bash linuxbrew \
+        && echo 'linuxbrew ALL=(ALL) NOPASSWD:ALL' >>/etc/sudoers
+
+COPY squid-self-signed.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+# RUN apt-get update && apt-get install -y ruby2.7
+# apt-get install -y libssl-dev libreadline-dev zlib1g-dev bzip2
+
+USER linuxbrew
+WORKDIR /home/linuxbrew
+ENV LANG=en_US.UTF-8 \
+        PATH=/home/linuxbrew/.npm-packages/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/linuxbrew/.asdf/bin/:$PATH \
+        SHELL=/bin/bash
+
+RUN git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.9.0
+RUN echo "asdf" \
+        && /bin/bash $HOME/.asdf/asdf.sh \
+        && asdf plugin add ruby \
+        && asdf install ruby 2.6.8 \
+        && asdf global ruby 2.6.8
+
+RUN echo "hugo" \
+        && asdf plugin add hugo \
+        && asdf install hugo latest \
+        && asdf global hugo latest
+
+RUN echo "yq" \
+        && asdf plugin add yq \
+        && asdf install yq 4.22.1 \
+        && asdf global yq 4.22.1
+
+RUN echo "gojq" \
+        && asdf plugin add gojq \
+        && asdf install gojq latest \
+        && asdf global gojq latest
+RUN ln -s /home/linuxbrew/.asdf/shims/gojq /home/linuxbrew/.asdf/shims/jq
+
+RUN echo "nodejs" \
+        && asdf plugin add nodejs \
+        && asdf install nodejs lts \
+        && asdf global nodejs lts
+
+ENV PATH=/home/linuxbrew/.asdf/shims:$PATH
+RUN git clone https://github.com/Homebrew/brew /home/linuxbrew/.linuxbrew/Homebrew \
+        && mkdir /home/linuxbrew/.linuxbrew/bin \
+        && ln -s ../Homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/ \
+        && brew config
+
+RUN brew install sacproj/sac/sac \
+        && brew cleanup -s \
+        && rm -rf $(brew --cache) \
+        && rm -rf /home/linuxbrew/.linuxbrew/Homebrew/Library/Taps
+
+RUN npm config set strict-ssl false
+RUN mkdir /home/linuxbrew/.npm-packages \
+        && npm config set prefix "/home/linuxbrew/.npm-packages" \
+        && npm install -g puppeteer \
+        && npm cache clean --force
